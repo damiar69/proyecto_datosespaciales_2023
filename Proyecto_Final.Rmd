@@ -1,0 +1,664 @@
+---
+title: <span style="font-size:1em;"> Proyecto Final~ Datos espaciales y espaciotemporales </span>
+author: <span style="font-size:1em;"> David Miralles Argente</span>
+date: <span style="font-size:1em;">`r format(Sys.time(), '%d/%B/%Y')`</span>
+output:
+  html_document:
+    toc: yes
+    toc_depth: '4'
+    toc_float: yes
+lang: es-ES
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, warning=FALSE, cache=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, cache=FALSE, message=FALSE)
+```
+
+
+## [**Introducción y carga de datos**]{style="color:black"}
+
+\
+
+### [ LIBRERIAS ]{style="color:black;"}
+
+```{r warning=FALSE, cache=FALSE, message=FALSE}
+
+#Librerias 
+
+library(DBI)
+library(odbc)
+library(rnaturalearth) 
+library(osmdata)
+library(tidyverse)
+library(sf)
+library(ggmap)
+library(spatstat)
+library(lattice)
+library(splancs)
+library(mapSpain)
+library(units)
+library(spatstat.geom)
+
+```
+
+\
+\
+
+### [ MAPA DE LA PENINSULA IBERICA ]{style="color:black;"}
+
+Creamos el mapa de la Peninsula Ibérica sobre el que pintaremos nuestros datos (vehículos)
+
+```{r}
+
+#MAPA ESPAÑA POR COMUNIDADES AUTONOMAS
+
+Spain<-mapSpain::esp_get_prov()
+
+mapa_Spain<- Spain%>%
+  filter(!codauto %in% c("04","05","18","19")) %>%
+  group_by(codauto) %>%
+  summarise()
+crs <- st_crs("EPSG:4258")
+plot(mapa_Spain$geometry)
+
+```
+
+\
+\
+
+### [ CARGA DE DATOS DE LA BASE DE DATOS RELACIONAL ]{style="color:black;"}
+
+Accedemos a la respectiva base de datos y lanzamos una query para leer nuestros datos. Una vez cargados los datos en nuestro environment comprobamos que la carga haya sido correcta pintandolos sobre el mapa de españa (creado en el apartado anterior).
+
+```{r}
+
+con<- dbConnect(odbc::odbc(),
+                dsn = "fuente",
+                Database ="Proyecto_Espaciales")
+
+query<- "SELECT * FROM VEHICULOS"
+
+tabla<-dbGetQuery(con,query)
+
+datos <- st_as_sf(tabla, coords = c("Longitud", "Latitud"), crs = crs) %>%
+  st_transform(crs)
+
+ggplot() +
+  geom_sf(data = mapa_Spain)+
+  geom_sf(data=datos$geometry, fill = "green", alpha = .5, size = 2, shape = 21)
+```
+\
+\
+
+## [**Analisis exploratorio de datos**]{style="color:black;"}
+
+
+Una vez cargados los datos de origen, realizamos las transformaciones necesarias corrigiendo los diferentes errores que estos presentaban.
+
+```{r}
+
+unique(datos$Com_Aut)
+
+datos$Com_Aut <- ifelse(datos$Com_Aut == 'Álava', 'PV', datos$Com_Aut)
+
+datos$Com_Aut <- ifelse(datos$Com_Aut == 'Avilés', 'Asturias', datos$Com_Aut)
+
+datos$Com_Aut <- ifelse(datos$Com_Aut == 'Huelva', 'Andalucía', datos$Com_Aut)
+
+unique(datos$Com_Aut)
+
+
+ggplot() +
+  geom_sf(data = mapa_Spain)+
+  geom_sf(data=datos$geometry,  aes(fill = datos$Com_Aut), alpha = .5, size = 3, shape = 21)
+
+#Asignamos a cada dato su correspondiente comunidad autónoma 
+
+datos[154,]$Com_Aut<-"Asturias"
+datos[57,]$Com_Aut<-"Madrid"
+datos[56,]$Com_Aut<-"Madrid"
+datos[151,]$Com_Aut<-"Cantabria"
+datos[141,]$Com_Aut<-"CL"
+datos[142,]$Com_Aut<-"Aragón"
+datos[149,]$Com_Aut<-"Aragón"
+datos[155,]$Com_Aut<-"CL"
+datos[123,]$Com_Aut<-"CL"
+datos[140,]$Com_Aut<-"CL"
+datos[135,]$Com_Aut<-"PV"
+datos[145,]$Com_Aut<-"PV"
+datos[150,]$Com_Aut<-"PV"
+datos[157,]$Com_Aut<-"La Rioja"
+
+#Eliminamos dato cuya coordenada es erronea
+datos<- datos[-148,]
+
+
+COM<-c("CV", "Madrid" , "Galicia" ,"CM" ,"Catalunya", "CL", "PV"  ,  "Andalucía" ,
+       "Cantabria" , "Asturias" , "Murcia" ,   "La Rioja" , "Navarra" ,  "Aragón"  ) 
+
+for (com in COM) {
+  datos_filtrados <- filter(datos, Com_Aut == com)
+  assign(paste0(com), datos_filtrados)
+}
+```
+\
+\
+
+### [  VISUALIZACIÓN DE LA CORRECIÓN DE LOS DATOS ]{style="color:black;"}
+
+
+```{r}
+
+#Observamos cuantos vehículos hay en cada comunidad
+
+for (nombre in COM) {
+  n_filas <- nrow(get(nombre))
+  cat("La Comunidad ", nombre, "tiene", n_filas, "vehiculos.\n")
+}
+
+
+#Cramos una tabla con el número de vehículos por cada comunidad autónoma
+
+table_Vehiculos <- data.frame(Comunidad = character(),
+                    Cantidad = numeric(),
+                    stringsAsFactors = FALSE)
+for (nombre in COM) {
+  n_filas <- nrow(get(nombre))
+  nueva_fila <- data.frame(Comunidad = nombre,
+                           Cantidad = n_filas)
+  table_Vehiculos <- rbind(table_Vehiculos, nueva_fila)
+}
+
+table_Vehiculos
+
+
+#Pintamos los vehículos sobre el mapa
+ggplot() +
+  geom_sf(data = mapa_Spain)+
+  geom_sf(data=datos$geometry,  aes(fill = datos$Com_Aut), alpha = 0.5, size = 3, shape = 21)
+
+```
+
+\
+\
+
+## [**Comunidades autónomas**]{style="color:black;"}
+
+
+### [ CREACIÓN CUADRANTE PARA LAS COMUNIDADES AUTÓNOMAS ]{style="color:black;"}
+
+Primero, creamos los diferentes centros lógisticos con los que cuenta nuestra compañia. Acto seguido, construimos nuesto correspondiente bounding box y superponemos la cuadricula 3x3 (GRID) al mapa de la Peninsula Ibérica.
+
+
+#### [  Creación centros logísticos  ]{style="color:black;"}
+
+```{r}
+
+ df <- data.frame(
+   Ubicacion = c("Córdoba", "Almazora", "Alcalá de Henares", "Zuera", "Gijón"),
+   Longitud = c(-4.779836, -0.152802, -3.364611, -0.762481, -5.661522),
+   Latitud = c(37.888175, 39.957313, 40.481663, 41.868992, 43.532201) )
+ 
+ Centros_logisticos <- st_as_sf(df, coords = c("Longitud", "Latitud"), crs = crs) %>%
+   st_transform(crs)
+ 
+ cent<- data.frame(x = df$Longitud, y = df$Latitud) %>% 
+   st_as_sf(coords = c("x", "y"))
+ 
+ w2 <- st_bbox(c(xmin = -8, ymin = 35, xmax = 2.6, ymax = 44)) %>%
+   st_as_sfc()
+ 
+ as.ppp(cent) 
+ pp2 <- as.ppp(c(w2, st_geometry(cent)))
+ par(mfrow = c(1, 1), mar = rep(0, 4))
+ 
+ #crear el cuadrante
+ q2 = quadratcount(pp2, nx=3, ny=3)
+ 
+```
+
+
+#### [  Creación del cuadrante (GRID)  ]{style="color:black;"}
+
+```{r}
+
+
+plot(datos$geometry, pch=16)
+
+xy <- data.frame(x = tabla$Longitud, y = tabla$Latitud) %>% 
+  st_as_sf(coords = c("x", "y"))
+
+
+w1 <- st_bbox(c(xmin = -8, ymin = 35, xmax = 2.6, ymax = 44)) %>%
+  st_as_sfc()
+
+ggplot() +
+  geom_sf(data = w1) + #coordenadas
+  geom_sf(data = xy) +  #rellena con puntos
+  theme_classic()
+
+as.ppp(xy) 
+pp1 <- as.ppp(xy)
+class(pp1)
+plot(pp1, axes = T)
+
+#xy es un objeto sf y dentro de este es un point
+
+pp1 <- as.ppp(c(w1, st_geometry(xy)))
+plot(pp1, axes = T)
+
+par(mfrow = c(1, 1), mar = rep(0, 4))
+
+#crear el cuadrante
+q1 = quadratcount(pp1, nx=3, ny=3)
+plot(q1, main = "")
+plot(xy, add = TRUE)
+
+#SUPERPONER A ESPAÑA
+plot(mapa_Spain$geometry)
+plot(q1, add = TRUE)
+plot(pp1, add = TRUE)
+plot(pp2, add = TRUE,col="red",pch = 18,
+     cex = 2,
+     bg = 0,
+     lwd = 1,
+     lty = 1)
+
+```
+
+\
+\
+
+## [**Aleatoriedad**]{style="color:black;"}
+
+#### [  Método Quadrant-test ]{style="color:black;"}
+
+Realizamos el método del Quadrant-test donde la hipotesis nula es que nuestros datos siguen una distribución completamente aleatoria. Debido el p-value obtenido, esta hipotesis es rechazada.
+
+```{r}
+
+#compara frecuencias esperadas con sus fercuencias observadas
+quadrat.test(pp1, nx=3, ny=3)
+
+```
+
+#### [  Método basado en distancias ]{style="color:black;"}
+
+Realizamos el método basado en distancias mediante la famosa función G y gráficamos los resultados.
+
+```{r}
+
+#GRAFICA: #Pag 15
+
+r <- seq(0, 0.25, len = 50)
+
+ap <- envelope(pp1, fun=Gest, r=r, nrank=4, nsim=200)
+
+y = rep("Ciudades", each=length(r))
+ap <- cbind(ap, y)
+
+print(xyplot(obs~theo|y, data=ap, type="l",
+             xlab = "theoretical", ylab = "observed",
+             panel=function(x, y, subscripts){
+               lpolygon(c(x, rev(x)),
+                        c(ap$lo[subscripts], rev(ap$hi[subscripts])),
+                        border="gray", col = "gray")
+               llines(x, y, col="black", lwd=2)}
+))
+
+```
+
+\
+\
+
+### [  DENSIDAD POR COMUNIDADES AUTÓNOMAS ]{style="color:black;"}
+
+
+Para poder realizar el analisis de la densidad, tenemos que pasar nuestros datos a coordenadas planas. Una vez realizada esta transformación y creada la ventana, utilizamos la función density para estimar la densidad.
+
+```{r}
+
+#PASAMOS LOS DATOS A COORDENADAS PLANAS:
+
+rm(datos)
+rm(crs)
+
+crs = 32630
+datos <- st_as_sf(tabla, coords = c("Longitud", "Latitud"), crs = crs) %>%
+  st_transform(crs)
+
+ Spain<-mapSpain::esp_get_prov()
+ mapa_Spain<- Spain%>%
+ filter(!codauto %in% c("04","05","18","19")) %>% group_by(codauto) %>% summarise()
+ 
+
+ mapa.sf <- st_as_sf(mapa_Spain, coords = geometry)
+ st_crs(mapa.sf) <- crs
+
+datos <- st_as_sf(tabla, coords = c("Longitud", "Latitud"), crs = crs) %>%  st_transform(crs)
+ spain_only2 <- st_transform(mapa.sf)
+ 
+ xy <- data.frame(x = tabla$Longitud, y = tabla$Latitud) %>% st_as_sf(coords = c("x", "y"))
+ st_crs(xy)<- 32630
+ 
+ pts.sf2 <- xy %>% st_sf() %>% mutate(sp="Puntos")
+ st_crs(pts.sf2)<- 32630
+
+ 
+ p1 <- ggplot() +
+    geom_sf(data=spain_only2) +
+     geom_sf(data=pts.sf2,aes(shape=sp,color=sp)) +
+      theme_bw() +
+      coord_sf()
+ 
+ p1
+ ventana <- spatstat.geom::as.owin(st_geometry(spain_only2))
+  pts <- as.ppp(
+      X = st_coordinates(pts.sf2), 
+      W = ventana
+    )
+ 
+#den1 <- density(pts, sigma = bw.diggle)
+den1 <- density(pts, sigma = 0.7)
+ par(mfrow = c(1,1))
+ plot(ventana)
+ plot(den1,add= TRUE)
+ plot(pts.sf2, add = TRUE)
+ 
+```
+
+\
+\
+
+## [**Tipo de vehículo**]{style="color:black;"}
+
+
+### [  ANALISIS DE LOS DATOS POR TIPO DE VEHICULO ]{style="color:black;"}
+
+
+```{r}
+
+
+ rm(datos)
+ rm(crs)
+ crs <- st_crs("EPSG:4258")
+ datos <- st_as_sf(tabla, coords = c("Longitud", "Latitud"), crs = crs) %>%
+   st_transform(crs)
+ 
+
+#Creamos una tabla para cada tipo de vehículo:
+ 
+ vehiculos <- c("Tractor", "Elevadora", "Furgoneta", "Grua", "Retráctil", "Transpaleta")
+ for (vehiculo in vehiculos) {
+   datos_filtrados <- filter(datos, Tipo_Vehiculo == vehiculo)
+   assign(paste0(vehiculo), datos_filtrados)
+ }
+ 
+#Vemos cuantos vehículos de cada tipo hay:
+ 
+ for (nombre in vehiculos) {
+   n_filas <- nrow(get(nombre))
+   cat("El data frame", nombre, "tiene", n_filas, "filas.\n")
+ }
+ 
+ #Eliminamos de nuevo el dato cuyas coordenadas eran erroneas
+ Furgoneta<-Furgoneta[-29,]
+ 
+ #Color amarillo los de maquinjaria almacen (retractil, transpaleta, Elevadora),
+ #colores fuerte vehiculos pesados (Tractor furgoneta Grua)
+ 
+ ggplot() +
+   geom_sf(data = mapa_Spain)+
+   geom_sf(data=Tractor$geometry, fill = "red", alpha = .5, size = 3, shape = 21)+
+   geom_sf(data=Furgoneta$geometry, fill = "darkgreen", alpha = .3, size = 3, shape = 21)+
+   geom_sf(data=Grua$geometry, fill = "blue", alpha = .3, size = 3, shape = 21)+
+   geom_sf(data=Retráctil$geometry, fill = "yellow", alpha = .5, size = 3, shape = 21)+
+   geom_sf(data=Transpaleta$geometry, fill = "yellow", alpha = .5, size = 3, shape = 21)+
+   geom_sf(data=Elevadora$geometry, fill = "yellow", alpha = .5, size = 3, shape = 21)
+ 
+```
+
+\
+\
+
+### [ CREACIÓN CUADRANTES SEGÚN TIPO DE VEHICULO (GRID)  ]{style="color:black;"}
+
+Creamos de nuevo las correspondientes cuadriculas para cada tipo de vehículo.
+
+```{r}
+
+ rm(xy)
+ xy <- st_as_sf(tabla, coords = c("Longitud", "Latitud")) 
+ 
+ vehiculos <- c("Tractor", "Elevadora", "Furgoneta", "Grua", "Retráctil", "Transpaleta")
+ for (vehiculo in vehiculos) {
+   datos_filtrados <- filter(xy, Tipo_Vehiculo == vehiculo)
+   assign(paste0(vehiculo), datos_filtrados)
+ }
+ 
+ w1 <- st_bbox(c(xmin = -8, ymin = 35, xmax = 2.6, ymax = 44)) %>%
+   st_as_sfc()
+ 
+
+```
+
+#### [  Creación del cuadrante (GRID) para los tractores  ]{style="color:black;"}
+
+```{r}
+
+  pp1 <- as.ppp(c(w1, st_geometry(Tractor$geometry)))
+ par(mfrow = c(1, 1), mar = rep(0, 4))
+ 
+ #crear el cuadrante
+ q1<- quadratcount(pp1, nx=3, ny=3)
+
+ #SUPERPONER A ESPAÑA
+ plot(mapa_Spain$geometry)
+ plot(q1 ,add = TRUE)
+ plot(pp1, add = TRUE, col="red")
+ plot(pp2, add = TRUE,col="red",pch = 18,
+      cex = 2,
+      bg = 0,
+      lwd = 1,
+      lty = 1)
+ 
+```
+
+
+#### [  Creación del cuadrante (GRID) para las gruas  ]{style="color:black;"}
+
+```{r}
+
+ #GRUA
+
+ pp1 <- as.ppp(c(w1, st_geometry(Grua$geometry)))
+ par(mfrow = c(1, 1), mar = rep(0, 4))
+ 
+ #crear el cuadrante
+ q1<- quadratcount(pp1, nx=3, ny=3)
+
+ #SUPERPONER A ESPAÑA
+ plot(mapa_Spain$geometry)
+ plot(q1 ,add = TRUE)
+ plot(pp1, add = TRUE, col="Blue")
+ plot(pp2, add = TRUE,col="red",pch = 18,
+      cex = 2,
+      bg = 0,
+      lwd = 1,
+      lty = 1)
+ 
+```
+
+#### [  Creación del cuadrante (GRID) para las furgonetas ]{style="color:black;"}
+
+```{r}
+ #FURGONETA
+
+ Furgoneta<-Furgoneta[-29,]
+ 
+ pp1 <- as.ppp(c(w1, st_geometry(Furgoneta$geometry)))
+ par(mfrow = c(1, 1), mar = rep(0, 4))
+ 
+ #crear el cuadrante
+ q1<- quadratcount(pp1, nx=3, ny=3)
+ 
+ #SUPERPONER A ESPAÑA
+ plot(mapa_Spain$geometry)
+ plot(q1 ,add = TRUE)
+ plot(pp1, add = TRUE, col="darkgreen")
+ plot(pp2, add = TRUE,col="red",pch = 18,
+      cex = 2,
+      bg = 0,
+      lwd = 1,
+      lty = 1)
+ 
+```
+
+
+#### [  Creación del cuadrante (GRID) para la maquinaria de almacén ]{style="color:black;"}
+
+```{r}
+
+ #MAQUINARIA
+ 
+Maquinaria<- filter(xy, Tipo_Vehiculo == "Transpaleta" | Tipo_Vehiculo == "Elevadora" | Tipo_Vehiculo =="Retráctil")
+ 
+ w1 <- st_bbox(c(xmin = -8, ymin = 35, xmax = 2.6, ymax = 44)) %>%
+   st_as_sfc()
+ pp1 <- as.ppp(c(w1, st_geometry(Maquinaria$geometry)))
+ par(mfrow = c(1, 1), mar = rep(0, 4))
+ 
+ #crear el cuadrante
+ q1<- quadratcount(pp1, nx=3, ny=3)
+ 
+ #SUPERPONER A ESPAÑA
+
+ plot(mapa_Spain$geometry)
+ plot(q1 ,add = TRUE)
+ plot(pp1, add = TRUE, col="orange")
+ plot(pp2, add = TRUE,col="red",pch = 18,
+      cex = 2,
+      bg = 0,
+      lwd = 1,
+      lty = 1)
+ 
+```
+
+\
+\
+
+### [  DENSIDAD POR TIPO DE VEHICULO ]{style="color:black;"}
+
+Estimamos la densidad para cada tipo de vehículo.
+
+```{r}
+ rm(datos)
+ rm(crs)
+ crs = 32630
+ datos <- st_as_sf(tabla, coords = c("Longitud", "Latitud"), crs = crs) %>%
+   st_transform(crs)
+```
+ 
+#### [  Densidad para los tractores ]{style="color:black;"}
+
+```{r}
+
+ #PARA Tractor
+ 
+ xy <- Tractor
+ st_crs(xy)<- 32630
+ pts.sf2 <- xy %>% st_sf() %>% mutate(sp="Puntos")
+ st_crs(pts.sf2)<- 32630
+ 
+ ventana <- spatstat.geom::as.owin(st_geometry(spain_only2))
+ pts <- as.ppp(
+   X = st_coordinates(pts.sf2), 
+   W = ventana
+ )
+ 
+ den1 <- density(pts, sigma = bw.diggle)
+ den1 <- density(pts, sigma = 0.6)
+ par(mfrow = c(1,1))
+ plot(ventana)
+ plot(den1,add= TRUE)
+ plot(pts.sf2, add = TRUE)
+ 
+```
+
+#### [  Densidad para las gruas ]{style="color:black;"}
+
+```{r}
+
+ #PARA GRUAS:
+ 
+ xy <- Grua
+ st_crs(xy)<- 32630
+ pts.sf2 <- xy %>% st_sf() %>% mutate(sp="Puntos")
+ st_crs(pts.sf2)<- 32630
+ 
+ ventana <- spatstat.geom::as.owin(st_geometry(spain_only2))
+ pts <- as.ppp(
+   X = st_coordinates(pts.sf2), 
+   W = ventana
+ )
+ 
+ den1 <- density(pts, sigma = bw.diggle)
+ den1 <- density(pts, sigma = 0.7)
+ par(mfrow = c(1,1))
+ plot(ventana)
+ plot(den1,add= TRUE)
+ plot(pts.sf2, add = TRUE)
+```
+
+#### [  Densidad para las furgonetas ]{style="color:black;"}
+
+```{r}
+ #PARA Furgoneta
+ 
+ xy <- Furgoneta
+ st_crs(xy)<- 32630
+ pts.sf2 <- xy %>% st_sf() %>% mutate(sp="Puntos")
+ st_crs(pts.sf2)<- 32630
+ 
+ ventana <- spatstat.geom::as.owin(st_geometry(spain_only2))
+ pts <- as.ppp(
+   X = st_coordinates(pts.sf2), 
+   W = ventana
+ )
+ 
+ den1 <- density(pts, sigma = bw.diggle)
+ den1 <- density(pts, sigma = 0.6)
+ par(mfrow = c(1,1))
+ plot(ventana)
+ plot(den1,add= TRUE)
+ plot(pts.sf2, add = TRUE)
+```
+
+#### [  Densidad para la maquinaria de almacén ]{style="color:black;"}
+
+```{r} 
+ #PARA MAQUINARIA
+ 
+ xy <- Maquinaria
+ st_crs(xy)<- 32630
+ pts.sf2 <- xy %>% st_sf() %>% mutate(sp="Puntos")
+ st_crs(pts.sf2)<- 32630
+ 
+ ventana <- spatstat.geom::as.owin(st_geometry(spain_only2))
+ pts <- as.ppp(
+   X = st_coordinates(pts.sf2), 
+   W = ventana
+ )
+ 
+ den1 <- density(pts, sigma = bw.diggle)
+ den1 <- density(pts, sigma = 0.7)
+ par(mfrow = c(1,1))
+ plot(ventana)
+ plot(den1,add= TRUE)
+ plot(pts.sf2, add = TRUE)
+```
+
+ 
